@@ -1015,6 +1015,23 @@ helps['containerapp connected-env list'] = """
           az containerapp connected-env list -g MyResourceGroup
 """
 
+helps['containerapp connected-env prepare'] = """
+    type: group
+    short-summary: Install prerequisites for Kubernetes cluster.
+"""
+
+helps['containerapp connected-env prepare setup-core-dns'] = """
+    type: command
+    short-summary: Setup CoreDNS for Kubernetes cluster.
+    examples:
+    - name: Setup CoreDNS for AksHci.
+      text: |
+          az containerapp connected-env prepare setup-core-dns --distro AksHci
+    - name: Setup CoreDNS for AksHci by specifying the kubeconfig and kubecontext.
+      text: |
+          az containerapp connected-env prepare setup-core-dns --distro AksHci --kube-config /path/to/kubeconfig --kube-context kubeContextName
+"""
+
 helps['containerapp connected-env dapr-component'] = """
     type: group
     short-summary: Commands to manage Dapr components for Container Apps connected environments.
