@@ -13,6 +13,7 @@ import zipfile
 import hashlib
 import re
 import requests
+import shutil
 import packaging.version as SemVer
 
 from enum import Enum
@@ -41,6 +42,7 @@ from ._constants import (CONTAINER_APP_EXTENSION_TYPE,
                          CONNECTED_ENV_CHECK_CERTIFICATE_NAME_AVAILABILITY_TYPE, DEV_SERVICE_LIST,
                          MANAGED_ENVIRONMENT_RESOURCE_TYPE, CONTAINER_APPS_RP, CONNECTED_CLUSTER_TYPE,
                          DEFAULT_CONNECTED_CLUSTER_EXTENSION_NAMESPACE, ACR_IMAGE_SUFFIX)
+from kubernetes import client as kube_client, config
 
 logger = get_logger(__name__)
 
@@ -828,3 +830,122 @@ def create_acrpull_role_assignment_if_needed(cmd, registry_server, registry_iden
                         raise UnauthorizedError(message) from e
                 else:
                     time.sleep(5)
+
+def create_kube_client(kube_config, kube_context, skip_ssl_verification=True):
+    #Loads authentication and cluster information from kube-config file and stores them in kubernetes.client.configuration
+    config.load_kube_config(config_file=kube_config, context=kube_context)
+    default_config = kube_client.Configuration.get_default_copy()
+    if skip_ssl_verification:
+        default_config.verify_ssl = False
+    return kube_client.ApiClient(default_config)
+
+def set_kube_config(kube_config):
+    print("Setting KubeConfig")
+    if kube_config:
+        # Trim kubeconfig. This is required for windows os.
+        if kube_config.startswith("'") or kube_config.startswith('"'):
+            kube_config = kube_config[1:]
+        if kube_config.endswith("'") or kube_config.endswith('"'):
+            kube_config = kube_config[:-1]
+        return kube_config
+    return None
+
+def load_kube_config(kube_config, kube_context, skip_ssl_verification=True):
+    try:
+        configuration = config.load_kube_config(config_file=kube_config, context=kube_context)
+        if skip_ssl_verification:
+            default_config = kube_client.Configuration.get_default_copy()
+            default_config.verify_ssl = False
+            kube_client.Configuration.set_default(default_config)
+
+    except Exception as e:
+        raise ValidationError("Problem loading the kubeconfig file." + str(e))
+
+def check_kube_connection():
+    print("Checking Connectivity to Cluster")
+    api_instance = kube_client.VersionApi()
+    try:
+        api_response = api_instance.get_code()
+        print(api_response.git_version)
+        return api_response.git_version
+    except Exception as e:  # pylint: disable=broad-except
+        logger.warning("Unable to verify connectivity to the Kubernetes cluster.")
+        raise ValidationError(f"Unable to verify connectivity to the Kubernetes cluster. {e}")
+
+def is_kubectl_installed():
+    print("Checking Kubectl installation")
+    try:
+        # Run a simple 'docker stats --no-stream' command to check if the Docker daemon is running
+        command = ["kubectl", "version"]
+        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+            _, _ = process.communicate()
+            return process.returncode == 0
+    except:
+        return False
+
+def create_folder(folder_name, time_stamp):
+    error = ""
+    try:
+        # Fetching path to user directory to create the arc diagnostic folder
+        home_dir = os.path.expanduser("~")
+        filepath = os.path.join(home_dir, ".azure", folder_name)
+        # Creating Diagnostic folder and its subfolder with the given timestamp and cluster name to store all the logs
+        try:
+            os.mkdir(filepath)
+        except FileExistsError:
+            pass
+        filepath_with_timestamp = os.path.join(filepath, time_stamp)
+        try:
+            os.mkdir(filepath_with_timestamp)
+        except FileExistsError:
+            # Deleting the folder if present with the same timestamp to prevent overriding in the same folder and then
+            #  creating it again
+            shutil.rmtree(filepath_with_timestamp, ignore_errors=True)
+            os.mkdir(filepath_with_timestamp)
+            pass
+
+        return filepath_with_timestamp, True, ""
+
+    # For handling storage or OS exception that may occur during the execution
+    except OSError as e:
+        if "[Errno 28]" in str(e):
+            shutil.rmtree(filepath_with_timestamp, ignore_errors=False, onerror=None)
+            error = "No space left on device"
+        else:
+            error = f"Error while trying to create diagnostic logs folder. Exception: {str(e)}"
+
+    # To handle any exception that may occur during the execution
+    except Exception as e:
+        error = f"Error while trying to create diagnostic logs folder. Exception: {str(e)}"
+
+    return "", False, error
+
+def create_subfolder(parent_path, subfolder_name):
+    if parent_path is None:
+        return "", False, "parent_path is required."
+
+    if subfolder_name is None:
+        return "", False, "subfolder_name is required."
+
+    error = ""
+    try:
+        filepath = os.path.join(parent_path, subfolder_name)
+        try:
+            os.mkdir(filepath)
+        except FileExistsError:
+            pass
+
+        return filepath, True, ""
+    # For handling storage or OS exception that may occur during the execution
+    except OSError as e:
+        if "[Errno 28]" in str(e):
+            shutil.rmtree(filepath, ignore_errors=False, onerror=None)
+            error = "No space left on device"
+        else:
+            error = f"Error while trying to create diagnostic logs folder. Exception: {str(e)}"
+
+    # To handle any exception that may occur during the execution
+    except Exception as e:
+        error = f"Error while trying to create diagnostic logs folder. Exception: {str(e)}"
+
+    return "", False, error

@@ -161,6 +161,9 @@ def load_command_table(self, args):
             g.custom_command('create', 'create_connected_environment', supports_no_wait=True, exception_handler=ex_handler_factory())
             g.custom_command('delete', 'delete_connected_environment', supports_no_wait=True, confirmation=True, exception_handler=ex_handler_factory())
 
+        with self.command_group('containerapp connected-env prepare', is_preview=True) as g:
+            g.custom_command('setup-core-dns', 'setup_core_dns', confirmation=True, exception_handler=ex_handler_factory())
+
         with self.command_group('containerapp connected-env dapr-component', is_preview=True) as g:
             g.custom_command('list', 'connected_env_list_dapr_components')
             g.custom_show_command('show', 'connected_env_show_dapr_component')

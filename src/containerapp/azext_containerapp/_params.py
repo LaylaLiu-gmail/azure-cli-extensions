@@ -19,7 +19,10 @@ from .action import AddCustomizedKeys
 from ._validators import (validate_env_name_or_id, validate_build_env_vars,
                           validate_custom_location_name_or_id, validate_env_name_or_id_for_up,
                           validate_otlp_headers, validate_target_port_range, validate_timeout_in_seconds)
-from ._constants import MAXIMUM_CONTAINER_APP_NAME_LENGTH, MAXIMUM_APP_RESILIENCY_NAME_LENGTH, MAXIMUM_COMPONENT_RESILIENCY_NAME_LENGTH
+from ._constants import (MAXIMUM_CONTAINER_APP_NAME_LENGTH, MAXIMUM_APP_RESILIENCY_NAME_LENGTH, MAXIMUM_COMPONENT_RESILIENCY_NAME_LENGTH,
+    AKS_HCI_DISTRO)
+
+
 
 
 def load_arguments(self, _):
@@ -346,6 +349,11 @@ def load_arguments(self, _):
         c.argument('azure_file_account_key', options_list=["--azure-file-account-key", "--storage-account-key", "-k"], help="Key of the AzureFile storage account.")
         c.argument('azure_file_share_name', options_list=["--azure-file-share-name", "--file-share", "-f"], help="Name of the share on the AzureFile storage.")
         c.argument('azure_file_account_name', options_list=["--azure-file-account-name", "--account-name", "-a"], help="Name of the AzureFile storage account.")
+
+    with self.argument_context('containerapp connected-env prepare setup-core-dns') as c:
+        c.argument('distro', arg_type=get_enum_type([AKS_HCI_DISTRO]), help="The distro supported to setup CoreDNS.")
+        c.argument('kube_config', options_list=["--kube-config"], help="Path to the kube config file.")
+        c.argument('kube_context',options_list=["--kube-context"], help="Kubconfig context from current machine.")
 
     with self.argument_context('containerapp connected-env dapr-component') as c:
         c.argument('dapr_component_name', help="The Dapr component name.")
