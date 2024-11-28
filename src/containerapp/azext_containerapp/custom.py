@@ -2118,11 +2118,11 @@ def setup_core_dns(cmd, distro=None, kube_config=None, kube_context=None):
     if not folder_status:
         raise ValidationError(error)
 
-    # backup original deployment and configmapV1PodTemplateSpec
-    backup_core_dns_deployment(kube_config, kube_context, original_filepath_with_timestamp)
-    backup_core_dns_configmap(kube_config, kube_context, original_filepath_with_timestamp)
-
     kube_client = create_kube_client(kube_config, kube_context, skip_ssl_verification=False)
+
+    # backup original deployment and configmapV1PodTemplateSpec
+    backup_core_dns_deployment_using_client(kube_client, original_filepath_with_timestamp)
+    backup_core_dns_configmap_using_client(kube_client, original_filepath_with_timestamp)
 
     coredns_deployment = get_deployment(CORE_DNS, KUBE_SYSTEM, kube_client)
     coredns_configmap = get_configmap(CORE_DNS, KUBE_SYSTEM, kube_client)
@@ -2162,7 +2162,7 @@ def setup_core_dns(cmd, distro=None, kube_config=None, kube_context=None):
     if not coredns_configmap_volume_set:
         raise ValidationError("Cannot find volume and volume mounts for core dns config map")
 
-    original_custom_core_dns_configmap = backup_custom_core_dns_configmap(kube_config, kube_context, original_filepath_with_timestamp)
+    original_custom_core_dns_configmap = backup_custom_core_dns_configmap_using_client(kube_client, original_filepath_with_timestamp)
 
     backup_exception = None
     try:
@@ -2177,9 +2177,9 @@ def setup_core_dns(cmd, distro=None, kube_config=None, kube_context=None):
     if not folder_status:
         raise ValidationError(error)
 
-    backup_core_dns_configmap(kube_config, kube_context, new_filepath_with_timestamp)
-    backup_core_dns_deployment(kube_config, kube_context, new_filepath_with_timestamp)
-    backup_custom_core_dns_configmap(kube_config, kube_context, new_filepath_with_timestamp)
+    backup_core_dns_configmap_using_client(kube_client, new_filepath_with_timestamp)
+    backup_core_dns_deployment_using_client(kube_client, new_filepath_with_timestamp)
+    backup_custom_core_dns_configmap_using_client(kube_client, new_filepath_with_timestamp)
 
     if backup_exception is not None:
         handle_raw_exception(backup_exception)
@@ -2249,6 +2249,23 @@ def rreplace(s, old, new, occurrence):
     li = s.rsplit(old, occurrence)
     return new.join(li)
 
+def backup_core_dns_deployment_using_client(kube_client, folder=None):
+    response = get_and_save_deployment(CORE_DNS, KUBE_SYSTEM, kube_client, folder)
+    if response is None:
+        raise ValidationError("CoreDns deployment cannot be found in kube-system namespace")
+
+    return response
+
+def backup_core_dns_configmap_using_client(kube_client, folder=None):
+    response = get_and_save_configmap(CORE_DNS, KUBE_SYSTEM, kube_client, folder)
+    if response is None:
+        raise ValidationError("CoreDns Configmap cannot be found in kube-system namespace")
+
+    return response
+
+def backup_custom_core_dns_configmap_using_client(kube_client, folder=None):
+    return get_and_save_configmap(CUSTOM_CORE_DNS, KUBE_SYSTEM, kube_client, folder)
+
 def backup_core_dns_deployment(kube_config=None, kube_context=None, folder=None):
     response = run_kubectl_get_command("deployments", CORE_DNS, KUBE_SYSTEM, kube_config, kube_context, True, folder)
     if response is None:
@@ -2309,7 +2326,33 @@ def run_kubectl_get_command(resource_type=None, resource_name=None, namespace=No
 
     return formatted_cluster_info
 
-def get_deployment(resource_name, resource_namespace, kube_client):
+def get_and_save_configmap(resource_name, resource_namespace, kube_client, folder=None):
+    configmap = get_configmap(resource_name, resource_namespace, kube_client, False)
+    if configmap is not None and folder is not None:
+        filepath = os.path.join(folder, f"configmap-{resource_name}.json")
+        try:
+            print(f"Save ConfigMap '{resource_name}' in namespace '{resource_namespace}' to {filepath} ")
+            with open(filepath, "w") as f:  # Opens file and casts as f
+                configmap_dict = json.loads(configmap.data)
+                f.write(json.dumps(configmap_dict, indent=2))
+        except Exception as e:
+            raise ValidationError(f"Failed to save file {filepath} with error '{str(e)}'")
+
+    return configmap
+def get_and_save_deployment(resource_name, resource_namespace, kube_client, folder=None):
+    deployment = get_deployment(resource_name, resource_namespace, kube_client, False)
+    if deployment is not None and folder is not None:
+        filepath = os.path.join(folder, f"deployment-{resource_name}.json")
+        try:
+            print(f"Save Deployment '{resource_name}' in namespace '{resource_namespace}' to {filepath} ")
+            with open(filepath, "w") as f:  # Opens file and casts as f
+                deployment_dict=json.loads(deployment.data)
+                f.write(json.dumps(deployment_dict, indent=2))
+        except Exception as e:
+            raise ValidationError(f"Failed to save file {filepath} with error '{str(e)}'")
+
+    return deployment
+def get_deployment(resource_name, resource_namespace, kube_client, preload=True):
     if resource_name is None or len(resource_name) == 0:
         raise InvalidArgumentValueError("Arg resource_name should not be None or Empty")
     if resource_namespace is None or len(resource_namespace) == 0:
@@ -2318,7 +2361,7 @@ def get_deployment(resource_name, resource_namespace, kube_client):
     deployment = None
     try:
         appsV1Api = client.AppsV1Api(kube_client)
-        deployment = appsV1Api.read_namespaced_deployment(name=resource_name, namespace=resource_namespace)
+        deployment = appsV1Api.read_namespaced_deployment(name=resource_name, namespace=resource_namespace, pretty=True, _preload_content=preload)
     except client.exceptions.ApiException as e:
         if e.status == 404:
             deployment = None
@@ -2341,7 +2384,7 @@ def update_deployment(resource_name, resource_namespace, kube_client, deployment
     except Exception as e:
         raise ValidationError(f"other errors while updating deployment coredns in kube-system {str(e)}")
 
-def get_configmap(resource_name, resource_namespace, kube_client):
+def get_configmap(resource_name, resource_namespace, kube_client, preload=True):
     if resource_name is None or len(resource_name) == 0:
         raise InvalidArgumentValueError("Arg resource_name should not be None or Empty")
     if resource_namespace is None or len(resource_namespace) == 0:
@@ -2350,7 +2393,7 @@ def get_configmap(resource_name, resource_namespace, kube_client):
     config_map = None
     try:
         core_v1_api = client.api.core_v1_api.CoreV1Api(kube_client)
-        config_map = core_v1_api.read_namespaced_config_map(name=resource_name, namespace=resource_namespace)
+        config_map = core_v1_api.read_namespaced_config_map(name=resource_name, namespace=resource_namespace, pretty=True, _preload_content=preload)
     except client.exceptions.ApiException as e:
         if e.status == 404:
             config_map = None
